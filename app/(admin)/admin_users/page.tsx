@@ -2,9 +2,33 @@
 
 import { useState, useEffect } from 'react';
 
+type SubjectSummary = {
+  id: number;
+  name: string;
+  subject_code?: string;
+  teacher?: string | null;
+};
+
+type UserRow = {
+  id: number;
+  email: string;
+  full_name: string;
+  role: string;
+  student_id?: string | null;
+  grade?: string | null;
+  subjects?: SubjectSummary[];
+  enrolled_subjects?: SubjectSummary[];
+};
+
+type SubjectRow = {
+  id: number;
+  subject_name: string;
+  subject_code: string;
+};
+
 export default function AdminUsers() {
-  const [users, setUsers] = useState<any[]>([]);
-  const [modules, setModules] = useState<any[]>([]); 
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [subjects, setSubjects] = useState<SubjectRow[]>([]); 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('student'); 
@@ -13,31 +37,61 @@ export default function AdminUsers() {
   const [editUserId, setEditUserId] = useState<number | null>(null);
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [userToDelete, setUserToDelete] = useState<any>(null);
+  const [userToDelete, setUserToDelete] = useState<UserRow | null>(null);
 
   const [formData, setFormData] = useState({
-    full_name: '', email: '', password: '', role: 'student', student_id: '', grade: '', module_id: ''
+    full_name: '', email: '', password: '', role: 'student', student_id: '', grade: '', subject_id: ''
   });
 
   const fetchUsers = async () => {
-    const res = await fetch('/api/users');
-    const data = await res.json();
-    setUsers(data);
+    try {
+      const res = await fetch('/api/users', { cache: 'no-store' });
+      const data: unknown = await res.json();
+
+      if (!res.ok) {
+        const message = typeof data === 'object' && data !== null && 'message' in data
+          ? String((data as { message: unknown }).message)
+          : 'Failed to load users';
+        console.error('GET /api/users failed:', message, data);
+        setUsers([]);
+        return;
+      }
+
+      setUsers(Array.isArray(data) ? data as UserRow[] : []);
+    } catch (error) {
+      console.error('Network error while loading users:', error);
+      setUsers([]);
+    }
   };
 
-  const fetchModules = async () => {
-    const res = await fetch('/api/modules');
-    const data = await res.json();
-    setModules(data);
+  const fetchSubjects = async () => {
+    try {
+      const res = await fetch('/api/subjects', { cache: 'no-store' });
+      const data: unknown = await res.json();
+
+      if (!res.ok) {
+        console.error('GET /api/subjects failed:', data);
+        setSubjects([]);
+        return;
+      }
+
+      setSubjects(Array.isArray(data) ? data as SubjectRow[] : []);
+    } catch (error) {
+      console.error('Network error while loading subjects:', error);
+      setSubjects([]);
+    }
   };
 
   useEffect(() => {
-    fetchUsers();
-    fetchModules();
+    const loadInitialData = async () => {
+      await Promise.all([fetchUsers(), fetchSubjects()]);
+    };
+
+    void loadInitialData();
   }, []);
 
   const resetForm = () => {
-    setFormData({ full_name: '', email: '', password: '', role: activeTab, student_id: '', grade: '', module_id: '' });
+    setFormData({ full_name: '', email: '', password: '', role: activeTab, student_id: '', grade: '', subject_id: '' });
     setIsEditing(false);
     setEditUserId(null);
   };
@@ -53,29 +107,13 @@ export default function AdminUsers() {
     });
 
     if (res.ok) {
-      const newUser = await res.json();
-      
-      if (formData.role === 'student' && formData.module_id) {
-         await fetch('/api/register-module', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ student_id: newUser.user.id, module_id: formData.module_id })
-         });
-      }
-
-      if (formData.role === 'teacher' && formData.module_id) {
-         await fetch('/api/modules', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ module_id: formData.module_id, teacher_id: newUser.user.id })
-         });
-      }
+      await res.json();
 
       setIsModalOpen(false);
       resetForm();
       
       await fetchUsers();
-      await fetchModules(); 
+      await fetchSubjects(); 
     } else {
       const error = await res.json();
       alert(error.message);
@@ -94,18 +132,11 @@ export default function AdminUsers() {
     });
 
     if (res.ok) {
-      if (formData.role === 'teacher' && formData.module_id) {
-         await fetch('/api/modules', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ module_id: formData.module_id, teacher_id: editUserId })
-         });
-      }
       setIsModalOpen(false);
       resetForm();
       
       await fetchUsers();
-      await fetchModules();
+      await fetchSubjects();
     } else {
       const error = await res.json();
       alert(error.message);
@@ -113,7 +144,7 @@ export default function AdminUsers() {
     setLoading(false);
   };
 
-  const openDeleteModal = (user: any) => {
+  const openDeleteModal = (user: UserRow) => {
     setUserToDelete(user);
     setIsDeleteModalOpen(true);
   };
@@ -126,17 +157,17 @@ export default function AdminUsers() {
       setIsDeleteModalOpen(false);
       setUserToDelete(null);
       await fetchUsers();
-      await fetchModules(); 
+      await fetchSubjects(); 
     } else {
       alert("Failed to delete user.");
     }
     setLoading(false);
   };
 
-  const openEditModal = (user: any) => {
-    let currentModuleId = '';
-    if (user.role === 'teacher' && user.subjects && user.subjects.length > 0) {
-      currentModuleId = user.subjects[0].id.toString(); 
+  const openEditModal = (user: UserRow) => {
+    let currentSubjectId = '';
+    if (user.role === 'teacher' && Array.isArray(user.subjects) && user.subjects.length > 0) {
+      currentSubjectId = user.subjects[0].id.toString(); 
     }
 
     setFormData({
@@ -146,7 +177,7 @@ export default function AdminUsers() {
       role: user.role,
       student_id: user.student_id || '',
       grade: user.grade || '',
-      module_id: currentModuleId 
+      subject_id: currentSubjectId 
     });
     setEditUserId(user.id);
     setIsEditing(true);
@@ -158,7 +189,7 @@ export default function AdminUsers() {
     setIsModalOpen(true);
   };
 
-  const filteredUsers = users.filter(user => user.role === activeTab);
+  const filteredUsers = Array.isArray(users) ? users.filter(user => user.role === activeTab) : [];
 
   const tabs = [
     { id: 'student', label: 'Students', color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -191,7 +222,7 @@ export default function AdminUsers() {
           >
             {tab.label}
             <span className={`px-2 py-0.5 rounded-full text-xs ${activeTab === tab.id ? 'bg-white/50' : 'bg-slate-100'}`}>
-              {users.filter(u => u.role === tab.id).length}
+              {Array.isArray(users) ? users.filter(u => u.role === tab.id).length : 0}
             </span>
           </button>
         ))}
@@ -232,18 +263,25 @@ export default function AdminUsers() {
                       <span className="px-2 py-1 bg-slate-100 text-slate-600 rounded-md text-xs font-bold">{user.grade || 'N/A'}</span>
                     </td>
                     <td className="p-4 text-sm text-slate-600">
-                      {user.enrolled_subjects ? user.enrolled_subjects.map((sub:any, i:number) => (
-                        <div key={i} className="mb-1"><strong className="text-slate-800">{sub.name}</strong> <span className="text-teal-600 text-xs">(by {sub.teacher || 'N/A'})</span></div>
-                      )) : <span className="text-rose-400 italic text-xs">Not enrolled</span>}
+                      {Array.isArray(user.enrolled_subjects) && user.enrolled_subjects.length > 0
+                        ? user.enrolled_subjects.map((sub, i) => (
+                          <div key={`${sub.id}-${i}`} className="mb-1">
+                            <strong className="text-slate-800">{sub.name}</strong>{' '}
+                            <span className="text-teal-600 text-xs">(by {sub.teacher || 'N/A'})</span>
+                          </div>
+                        ))
+                        : <span className="text-rose-400 italic text-xs">Not enrolled</span>}
                     </td>
                   </>
                 )}
 
                 {activeTab === 'teacher' && (
                   <td className="p-4 text-sm text-slate-600">
-                    {user.subjects && user.subjects.length > 0 ? user.subjects.map((sub:any, i:number) => (
-                       <span key={i} className="inline-block bg-teal-50 text-teal-700 px-2 py-1 rounded-md mr-2 mb-1 text-xs">{sub.name}</span>
-                    )) : <span className="text-rose-400 italic text-xs">No subjects assigned</span>}
+                    {Array.isArray(user.subjects) && user.subjects.length > 0
+                      ? user.subjects.map((sub, i) => (
+                        <span key={`${sub.id}-${i}`} className="inline-block bg-teal-50 text-teal-700 px-2 py-1 rounded-md mr-2 mb-1 text-xs">{sub.name}</span>
+                      ))
+                      : <span className="text-rose-400 italic text-xs">No subjects assigned</span>}
                   </td>
                 )}
 
@@ -297,11 +335,11 @@ export default function AdminUsers() {
               {activeTab === 'teacher' && (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Assign Subject (Optional)</label>
-                  <select value={formData.module_id} onChange={e => setFormData({...formData, module_id: e.target.value})} className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-500 outline-none text-black bg-white">
+                  <select value={formData.subject_id} onChange={e => setFormData({...formData, subject_id: e.target.value})} className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-500 outline-none text-black bg-white">
                     <option value="">-- No Subject Assigned --</option>
-                    {modules.map(mod => (
-                      <option key={mod.id} value={mod.id}>
-                        {mod.module_name} ({mod.module_code})
+                    {subjects.map(sub => (
+                      <option key={sub.id} value={sub.id}>
+                        {sub.subject_name} ({sub.subject_code})
                       </option>
                     ))}
                   </select>
@@ -334,10 +372,10 @@ export default function AdminUsers() {
                   {!isEditing && (
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Enroll to Subject (Optional)</label>
-                      <select value={formData.module_id} onChange={e => setFormData({...formData, module_id: e.target.value})} className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-500 outline-none text-black bg-white">
-                        <option value="">-- Don't enroll yet --</option>
-                        {modules.map(mod => (
-                          <option key={mod.id} value={mod.id}>{mod.module_name} ({mod.module_code})</option>
+                      <select value={formData.subject_id} onChange={e => setFormData({...formData, subject_id: e.target.value})} className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-500 outline-none text-black bg-white">
+                        <option value="">-- Don&apos;t enroll yet --</option>
+                        {subjects.map(sub => (
+                          <option key={sub.id} value={sub.id}>{sub.subject_name} ({sub.subject_code})</option>
                         ))}
                       </select>
                     </div>
